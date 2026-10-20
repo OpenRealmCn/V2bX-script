@@ -109,7 +109,7 @@ update() {
 
 config() {
     echo "V2bX在修改配置后会自动尝试重启"
-    vi /etc/V2bX/config.yml
+    vi /etc/V2bX/config.json
     sleep 2
     check_status
     case $? in
@@ -353,124 +353,153 @@ show_V2bX_version() {
     fi
 }
 
+# 转义 JSON 字符串中的反斜杠与双引号，避免用户输入破坏生成的 config.json
+json_escape() {
+    local s=$1
+    s=${s//\\/\\\\}
+    s=${s//\"/\\\"}
+    printf '%s' "$s"
+}
+
 generate_config_file() {
     echo -e "${yellow}V2bX 配置文件生成向导${plain}"
     echo -e "${red}请阅读以下注意事项：${plain}"
     echo -e "${red}1. 目前该功能正处测试阶段${plain}"
-    echo -e "${red}2. 生成的配置文件会保存到 /etc/V2bX/config.yml${plain}"
-    echo -e "${red}3. 原来的配置文件会保存到 /etc/V2bX/config.yml.bak${plain}"
+    echo -e "${red}2. 生成的配置文件会保存到 /etc/V2bX/config.json${plain}"
+    echo -e "${red}3. 原来的配置文件会保存到 /etc/V2bX/config.json.bak${plain}"
     echo -e "${red}4. 目前不支持TLS${plain}"
     read -rp "是否继续生成配置文件？(y/n)" generate_config_file_continue
     if [[ $generate_config_file_continue =~ "y"|"Y" ]]; then
         read -rp "请输入机场网址：" ApiHost
         read -rp "请输入面板对接API Key：" ApiKey
         read -rp "请输入节点Node ID:" NodeID
+        echo -e "${yellow}请选择内核类型，如未列出则不支持：${plain}"
+        echo -e "${green}1. xray ${plain}"
+        echo -e "${green}2. sing ${plain}"
+        read -rp "请输入内核类型 [1-2，默认1]：" CoreType
+        case "$CoreType" in
+            2 ) CoreType="sing" ;;
+            * ) CoreType="xray" ;;
+        esac
         echo -e "${yellow}请选择节点传输协议，如未列出则不支持：${plain}"
         echo -e "${green}1. Shadowsocks ${plain}"
         echo -e "${green}2. V2ray ${plain}"
         echo -e "${green}3. Trojan ${plain}"
-        read -rp "请输入机场传输协议 [1-4，默认1]：" NodeType
+        read -rp "请输入机场传输协议 [1-3，默认1]：" NodeType
         case "$NodeType" in
-            1 ) NodeType="Shadowsocks" ;;
-            2 ) NodeType="V2ray" ;;
-            3 ) NodeType="Trojan" ;;
-            * ) NodeType="Shadowsocks" ;;
+            1 ) NodeType="shadowsocks" ;;
+            2 ) NodeType="vmess" ;;
+            3 ) NodeType="trojan" ;;
+            * ) NodeType="shadowsocks" ;;
         esac
+        if [[ -z "${ApiHost}" ]]; then
+            ApiHost="http://127.0.0.1"
+        fi
+        if [[ -z "${NodeID}" || ! "${NodeID}" =~ ^[0-9]+$ ]]; then
+            NodeID=1
+        fi
+        if [[ x"${CoreType}" == x"sing" ]]; then
+            CoreBlock='    {
+      "Type": "sing",
+      "Log": {
+        "Level": "error",
+        "Timestamp": true
+      },
+      "NTP": {
+        "Enable": false,
+        "Server": "time.apple.com",
+        "ServerPort": 0
+      },
+      "OriginalPath": ""
+    }'
+        else
+            CoreBlock='    {
+      "Type": "xray",
+      "Log": {
+        "Level": "warning",
+        "AccessPath": "",
+        "ErrorPath": ""
+      },
+      "AssetPath": "/etc/V2bX/",
+      "DnsConfigPath": "",
+      "RouteConfigPath": "",
+      "InboundConfigPath": "",
+      "OutboundConfigPath": "",
+      "XrayConnectionConfig": {
+        "handshake": 4,
+        "connIdle": 30,
+        "uplinkOnly": 2,
+        "downlinkOnly": 4,
+        "bufferSize": 64
+      }
+    }'
+        fi
         cd /etc/V2bX
-        mv config.yml config.yml.bak
-        cat <<EOF > /etc/V2bX/config.yml
-CoreConfig:
-  Type: "xray" # Core type, default support "xray" and "hy". If you need many cores, use " " to split
-  XrayConfig:
-    Log:
-      Level: warning # Log level: none, error, warning, info, debug
-      AccessPath: # /etc/XrayR/access.Log
-      ErrorPath: # /etc/XrayR/error.log
-    DnsConfigPath: # /etc/XrayR/dns.json # Path to dns config, check https://xtls.github.io/config/dns.html for help
-    RouteConfigPath: # /etc/XrayR/route.json # Path to route config, check https://xtls.github.io/config/routing.html for help
-    InboundConfigPath: # /etc/XrayR/custom_inbound.json # Path to custom inbound config, check https://xtls.github.io/config/inbound.html for help
-    OutboundConfigPath: # /etc/XrayR/custom_outbound.json # Path to custom outbound config, check https://xtls.github.io/config/outbound.html for help
-    ConnectionConfig:
-      Handshake: 4 # Handshake time limit, Second
-      ConnIdle: 30 # Connection idle time limit, Second
-      UplinkOnly: 2 # Time limit when the connection downstream is closed, Second
-      DownlinkOnly: 4 # Time limit when the connection is closed after the uplink is closed, Second
-      BufferSize: 64 # The internal cache size of each connection, kB
-Nodes:
-  - ApiConfig:
-      ApiHost: "http://127.0.0.1:667"
-      ApiKey: "123"
-      NodeID: 41
-      NodeType: V2ray # Node type: V2ray, Shadowsocks, Trojan
-      Timeout: 30 # Timeout for the api request
-      RuleListPath: # /etc/XrayR/rulelist Path to local rulelist file
-    ControllerConfig:
-      ListenIP: 0.0.0.0 # IP address you want to listen
-      SendIP: 0.0.0.0 # IP address you want to send pacakage
-      XrayOptions:
-        EnableDNS: false # Use custom DNS config, Please ensure that you set the dns.json well
-        DNSType: AsIs # AsIs, UseIP, UseIPv4, UseIPv6, DNS strategy
-        EnableTFO: false # Enable TCP Fast Open
-        EnableProxyProtocol: false # Only works for WebSocket and TCP
-        EnableFallback: false # Only support for Trojan and Vless
-        FallBackConfigs: # Support multiple fallbacks
-          - SNI: # TLS SNI(Server Name Indication), Empty for any
-            Alpn: # Alpn, Empty for any
-            Path: # HTTP PATH, Empty for any
-            Dest: 80 # Required, Destination of fallback, check https://xtls.github.io/config/features/fallback.html for details.
-            ProxyProtocolVer: 0 # Send PROXY protocol version, 0 for disable
-      HyOptions:
-        Resolver: "udp://1.1.1.1:53" # DNS resolver address
-        ResolvePreference: 64 # DNS IPv4/IPv6 preference. Available options: "64" (IPv6 first, fallback to IPv4), "46" (IPv4 first, fallback to IPv6), "6" (IPv6 only), "4" (IPv4 only)
-        SendDevice: "eth0" # Bind device for outbound connections (usually requires root)
-      LimitConfig:
-        EnableRealtime: false # Check device limit on real time
-        SpeedLimit: 0 # Mbps, Local settings will replace remote settings, 0 means disable
-        DeviceLimit: 0 # Local settings will replace remote settings, 0 means disable
-        ConnLimit: 0 # Connecting limit, only working for TCP, 0mean
-        EnableIpRecorder: false # Enable online ip report
-        IpRecorderConfig:
-          Type: "Recorder" # Recorder type: Recorder, Redis
-          RecorderConfig:
-            Url: "http://127.0.0.1:123" # Report url
-            Token: "123" # Report token
-            Timeout: 10 # Report timeout, sec.
-          RedisConfig:
-            Address: "127.0.0.1:6379" # Redis address
-            Password: "" # Redis password
-            DB: 0 # Redis DB
-            Expiry: 60 # redis expiry time, sec.
-          Periodic: 60 # Report interval, sec.
-          EnableIpSync: false # Enable online ip sync
-        EnableDynamicSpeedLimit: false # Enable dynamic speed limit
-        DynamicSpeedLimitConfig:
-          Periodic: 60 # Time to check the user traffic , sec.
-          Traffic: 0 # Traffic limit, MB
-          SpeedLimit: 0 # Speed limit, Mbps
-          ExpireTime: 0 # Time limit, sec.
-      CertConfig:
-        CertMode: dns # Option about how to get certificate: none, file, http, dns, reality, remote. Choose "none" will forcedly disable the tls config.
-        CertDomain: "node1.test.com" # Domain to cert
-        CertFile: /etc/XrayR/cert/node1.test.com.cert # Provided if the CertMode is file
-        KeyFile: /etc/XrayR/cert/node1.test.com.key
-        Provider: alidns # DNS cert provider, Get the full support list here: https://go-acme.github.io/lego/dns/
-        Email: test@me.com
-        DNSEnv: # DNS ENV option used by DNS provider
-          ALICLOUD_ACCESS_KEY: aaa
-          ALICLOUD_SECRET_KEY: bbb
-        RealityConfig: # This config like RealityObject for xray-core, please check https://xtls.github.io/config/transport.html#realityobject
-          Dest: 80 # Same fallback dest
-          Xver: 0 # Same fallback xver
-          ServerNames:
-            - "example.com"
-            - "www.example.com"
-          PrivateKey: "" # Private key for server
-          MinClientVer: "" # Min client version
-          MaxClientVer: "" # Max client version
-          MaxTimeDiff: 0 # Max time difference, ms
-          ShortIds: # Short ids
-            - ""
-            - "0123456789abcdef"
+        mv config.json config.json.bak
+        cat <<EOF > /etc/V2bX/config.json
+{
+  "Log": {
+    "Level": "info",
+    "Output": ""
+  },
+  "Cores": [
+$CoreBlock
+  ],
+  "Nodes": [
+    {
+      "Core": "$CoreType",
+      "ApiHost": "$(json_escape "$ApiHost")",
+      "ApiKey": "$(json_escape "$ApiKey")",
+      "NodeID": $NodeID,
+      "NodeType": "$NodeType",
+      "Timeout": 30,
+      "ListenIP": "0.0.0.0",
+      "SendIP": "0.0.0.0",
+      "DeviceOnlineMinTraffic": 200,
+      "ReportMinTraffic": 0,
+      "LimitConfig": {
+        "EnableRealtime": false,
+        "SpeedLimit": 0,
+        "DeviceLimit": 0,
+        "ConnLimit": 0,
+        "EnableIpRecorder": false,
+        "IpRecorderConfig": {
+          "Periodic": 60,
+          "Type": "Recorder",
+          "RecorderConfig": {
+            "Url": "http://127.0.0.1:123",
+            "Token": "123",
+            "Timeout": 10
+          },
+          "RedisConfig": {
+            "Address": "127.0.0.1:6379",
+            "Password": "",
+            "Db": 0,
+            "Expiry": 60
+          },
+          "EnableIpSync": false
+        },
+        "EnableDynamicSpeedLimit": false,
+        "DynamicSpeedLimitConfig": {
+          "Periodic": 60,
+          "Traffic": 0,
+          "SpeedLimit": 0,
+          "ExpireTime": 0
+        }
+      },
+      "CertConfig": {
+        "CertMode": "none",
+        "RejectUnknownSni": false,
+        "CertDomain": "node1.test.com",
+        "CertFile": "/etc/V2bX/cert/node1.test.com.cert",
+        "KeyFile": "/etc/V2bX/cert/node1.test.com.key",
+        "Provider": "alidns",
+        "Email": "test@me.com",
+        "DNSEnv": {}
+      }
+    }
+  ]
+}
 EOF
         echo -e "${green}V2bX 配置文件生成完成，正在重新启动 V2bX 服务${plain}"
         restart 0

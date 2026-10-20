@@ -83,10 +83,10 @@ install_base() {
 
 # 0: running, 1: not running, 2: not installed
 check_status() {
-    if [[ ! -f /etc/systemd/system/XrayR.service ]]; then
+    if [[ ! -f /etc/systemd/system/V2bX.service ]]; then
         return 2
     fi
-    temp=$(systemctl status XrayR | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
+    temp=$(systemctl status V2bX | grep Active | awk '{print $3}' | cut -d "(" -f2 | cut -d ")" -f1)
     if [[ x"${temp}" == x"running" ]]; then
         return 0
     else
@@ -140,8 +140,8 @@ install_V2bX() {
     cp geoip.dat /etc/V2bX/
     cp geosite.dat /etc/V2bX/
 
-    if [[ ! -f /etc/V2bX/config.yml ]]; then
-        cp config.yml /etc/V2bX/
+    if [[ ! -f /etc/V2bX/config.json ]]; then
+        cp config.json /etc/V2bX/
         echo -e ""
         echo -e "全新安装，请先参看教程：https://github.com/OpenRealmCn/V2bX，配置必要的内容"
     else
@@ -167,9 +167,6 @@ install_V2bX() {
     fi
     if [[ ! -f /etc/V2bX/custom_inbound.json ]]; then
         cp custom_inbound.json /etc/V2bX/
-    fi
-    if [[ ! -f /etc/V2bX/rulelist ]]; then
-        cp rulelist /etc/V2bX/
     fi
     curl -o /usr/bin/V2bX -Ls https://raw.githubusercontent.com/OpenRealmCn/V2bX-script/master/V2bX.sh
     chmod +x /usr/bin/V2bX
